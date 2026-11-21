@@ -14,6 +14,41 @@ from app import crud
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
+# Run SLA Escalation
+@router.post("/run-escalation")
+def run_escalation(
+    request: Request,
+    current_admin=Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    candidates = crud.get_escalation_candidates(db)
+    total_escalated = 0
+
+    for complaint in candidates:
+        next_level = min((complaint.escalation_level or 0) + 1, 4)
+
+        crud.escalate_complaint(
+            db,
+            complaint.complaint_id,
+            next_level,
+            current_admin.username,
+        )
+        total_escalated += 1
+
+    crud.log_audit(
+        db,
+        "escalation_run",
+        current_admin.username,
+        current_admin.role,
+        "complaint",
+        "multiple",
+        f"{total_escalated} complaints escalated",
+        request.client.host if request.client else None,
+    )
+
+    return {"total_escalated": total_escalated}
+
+
 
 # Departments
 @router.get("/departments", response_model=List[DepartmentResponse])
