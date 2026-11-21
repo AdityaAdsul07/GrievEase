@@ -241,21 +241,8 @@
     <script src="script.js"></script>
 
     <!-- Live stats from API -->
-    <script>
-      (async () => {
-        try {
-          const r = await fetch("http://127.0.0.1:8000/api/complaints/stats");
-          if (r.ok) {
-            const d = await r.json();
-            const t = document.getElementById("landingTotal");
-            const s = document.getElementById("landingResolved");
-            if (t) t.textContent = d.total;
-            if (s) s.textContent = d.resolved;
-          }
-        } catch {}
-      })();
-    </script>
-    <script>window.__API_BASE__ = "https://grievease-9wta.onrender.com";</script>
+    
+    
 
   </body>
 </html>
