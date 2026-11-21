@@ -12,7 +12,10 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 @router.post("/student/login", response_model=Token)
 def student_login(student_data: StudentCreate, request: Request, db: Session = Depends(get_db)):
-    student = crud.create_student(db, student_data)
+    try:
+        student = crud.create_student(db, student_data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     token = create_access_token(data={"sub": student.id, "type": "student"})
     crud.log_audit(db, "login", student.admission_number, "student",
                    "student", str(student.id), "Student login",

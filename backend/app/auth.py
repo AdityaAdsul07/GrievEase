@@ -47,16 +47,23 @@ def decode_token(token: str) -> TokenData:
         )
 
 
+def _password_matches(plain: str, hashed: str) -> bool:
+    try:
+        return verify_password(plain, hashed)
+    except Exception:
+        return False
+
+
 def authenticate_admin(username: str, password: str, db: Session) -> Optional[Admin]:
-    admin = db.query(Admin).filter(Admin.username == username).first()
-    if not admin or not verify_password(password, admin.hashed_password):
+    admin = db.query(Admin).filter(Admin.username == username, Admin.is_active == True).first()
+    if not admin or not _password_matches(password, admin.hashed_password):
         return None
     return admin
 
 
 def authenticate_staff(email: str, password: str, db: Session) -> Optional[Staff]:
     staff = db.query(Staff).filter(Staff.email == email, Staff.is_active == True).first()
-    if not staff or not verify_password(password, staff.hashed_password):
+    if not staff or not _password_matches(password, staff.hashed_password):
         return None
     return staff
 

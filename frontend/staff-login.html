@@ -104,10 +104,6 @@
       <h1 class="login-title">Staff Login</h1>
       <p class="login-subtitle">Login with your university staff credentials to access your assigned grievances.</p>
 
-      <div class="demo-cred">
-        🔑 <strong>Demo:</strong> arun.kumar@university.edu &nbsp;/&nbsp; staff123
-      </div>
-
       <div id="staffLoginError">❌ Invalid email or password. Please try again.</div>
 
       <form id="staffLoginForm">
@@ -132,7 +128,13 @@
   </div>
 
   <div id="staffLoginError" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;font-size:.83rem;color:#dc2626;margin:0 2.5rem 1rem;"></div>
- <script>window.__API_BASE__ = "https://grievease-pwob.onrender.com";</script>
+  <script>
+    if (!["localhost", "127.0.0.1", ""].includes(window.location.hostname) && window.location.protocol !== "file:") {
+      window.__API_BASE__ = "https://grievease-pwob.onrender.com";
+    } else {
+      window.__API_BASE__ = "http://127.0.0.1:8000";
+    }
+  </script>
   <script src="script.js"></script>
 
 </body>

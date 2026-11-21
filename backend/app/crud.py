@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, desc, or_, and_
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 import random
+from fastapi import HTTPException, status
 
 from app.models import (
     Student, Admin, Staff, Department, Complaint,
@@ -13,7 +15,7 @@ from app.schemas import (
     ComplaintRating, StaffCreate, StaffUpdate, DepartmentCreate,
     DepartmentUpdate, CommentCreate, BulkUpdateRequest
 )
-from app.auth import get_password_hash
+from app.auth import get_password_hash, verify_password
 
 
 # SLA (in days) per category
@@ -53,13 +55,25 @@ def get_student_by_admission(db: Session, admission_number: str) -> Optional[Stu
     return db.query(Student).filter(Student.admission_number == admission_number).first()
 
 def create_student(db: Session, student: StudentCreate) -> Student:
-    existing = get_student_by_email(db, student.email)
-    if existing:
-        if existing.name != student.name:
-            existing.name = student.name
+    """Login-or-register. Email and admission number must belong to the same student."""
+    by_email = get_student_by_email(db, student.email)
+    by_admission = get_student_by_admission(db, student.admission_number)
+
+    if by_email and by_admission and by_email.id != by_admission.id:
+        raise ValueError("Email and admission number belong to different students")
+
+    if by_email:
+        if by_email.admission_number != student.admission_number:
+            raise ValueError("Email is already registered with a different admission number")
+        if by_email.name != student.name:
+            by_email.name = student.name
             db.commit()
-            db.refresh(existing)
-        return existing
+            db.refresh(by_email)
+        return by_email
+
+    if by_admission:
+        raise ValueError("Admission number is already registered with a different email")
+
     db_s = Student(
         name=student.name,
         email=student.email,
@@ -68,9 +82,13 @@ def create_student(db: Session, student: StudentCreate) -> Student:
         department=student.department,
         semester=student.semester,
     )
-    db.add(db_s)
-    db.commit()
-    db.refresh(db_s)
+    try:
+        db.add(db_s)
+        db.commit()
+        db.refresh(db_s)
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("Email or admission number is already registered")
     return db_s
 
 
@@ -181,6 +199,7 @@ def update_staff(db: Session, staff_id: int, data: StaffUpdate) -> Optional[Staf
     db.commit()
     db.refresh(s)
     return s
+
 
 
 # Complaint helpers
@@ -629,10 +648,11 @@ def get_analytics(db: Session) -> dict:
     pri_data = db.query(Complaint.priority, func.count(Complaint.id)).group_by(Complaint.priority).all()
     sts_data = db.query(Complaint.status,   func.count(Complaint.id)).group_by(Complaint.status).all()
 
-    monthly = db.query(
-        func.strftime("%Y-%m", Complaint.created_at).label("month"),
-        func.count(Complaint.id).label("count")
-    ).group_by("month").order_by("month").all()
+    # Database-agnostic monthly aggregation (works on SQLite, PostgreSQL, MySQL)
+    all_dates = db.query(Complaint.created_at).filter(Complaint.created_at != None).all()
+    from collections import Counter
+    month_counts = Counter(d[0].strftime("%Y-%m") for d in all_dates if d[0])
+    monthly = sorted(month_counts.items())
 
     # SQLite-compatible: get all complaints and aggregate in Python
     all_dept_complaints = db.query(

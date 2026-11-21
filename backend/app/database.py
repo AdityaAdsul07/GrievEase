@@ -6,18 +6,22 @@ from app.config import settings
 # Engine Setup
 # SQLite needs check_same_thread=False; PostgreSQL does not need it
 connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+if db_url.startswith("sqlite"):
     connect_args["check_same_thread"] = False
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    db_url,
     connect_args=connect_args,
     pool_pre_ping=True,       # Verify connection before using from pool
     pool_recycle=300,         # Recycle connections every 5 minutes
 )
 
 # Enable WAL mode for SQLite (better concurrent read performance)
-if settings.DATABASE_URL.startswith("sqlite"):
+if db_url.startswith("sqlite"):
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -40,4 +44,5 @@ def get_db():
 
 def init_db():
     """Create all tables (runs on startup)."""
+    import app.models  # noqa: F401
     Base.metadata.create_all(bind=engine)

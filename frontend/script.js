@@ -1,9 +1,18 @@
 // GrievEase frontend logic - handles student, staff and admin dashboards
 
-// API_BASE: window.__API_BASE__ set karo HTML mein production ke liye
-// Local dev ke liye http://127.0.0.1:8000 use hoga
-const API_BASE = window.__API_BASE__ ||
-  "https://grievease-pwob.onrender.com";
+// Production and Local API endpoints
+const PROD_API_BASE = "https://grievease-pwob.onrender.com";
+const LOCAL_API_BASE = "http://127.0.0.1:8000";
+
+function resolveApiBase() {
+  if (window.__API_BASE__ && typeof window.__API_BASE__ === "string") {
+    return window.__API_BASE__.replace(/\/+$/, "");
+  }
+  const isLocal = ["localhost", "127.0.0.1", ""].includes(window.location.hostname) || window.location.protocol === "file:";
+  return isLocal ? LOCAL_API_BASE : PROD_API_BASE;
+}
+
+const API_BASE = resolveApiBase();
 
 const COLORS = ["#2563eb","#16a34a","#d97706","#dc2626","#7c3aed","#0891b2","#be185d","#15803d","#c2410c","#1d4ed8"];
 const COLORS_ALPHA = ["rgba(37,99,235,.7)","rgba(22,163,74,.7)","rgba(217,119,6,.7)","rgba(220,38,38,.7)","rgba(124,58,237,.7)","rgba(8,145,178,.7)","rgba(190,24,93,.7)","rgba(21,128,61,.7)","rgba(194,65,12,.7)","rgba(29,78,216,.7)"];
@@ -26,6 +35,7 @@ const API = {
   departments:    `${API_BASE}/api/admin/departments`,
   auditLogs:      `${API_BASE}/api/admin/audit-logs`,
   exportCsv:      `${API_BASE}/api/admin/reports/complaints/csv`,
+  analyticsJson:  `${API_BASE}/api/admin/reports/analytics/json`,
   backup:         `${API_BASE}/api/admin/backup`,
   escalation:     `${API_BASE}/api/admin/run-escalation`,
   notifications:  `${API_BASE}/api/notifications/`,
@@ -90,6 +100,35 @@ async function apiRequest(url, opts = {}) {
     }
     return await res.json();
   } catch (e) { console.error("API:", e.message); throw e; }
+}
+
+async function downloadAuthenticated(url, fallbackName) {
+  const token = getToken();
+  if (!token) {
+    showToast("Please log in again to download this file.", "error");
+    return;
+  }
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401) {
+    showToast("Session expired. Please log in again.", "error");
+    return;
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Download failed" }));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Download failed");
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = /filename=([^;]+)/.exec(disposition);
+  const filename = (match ? match[1] : fallbackName).replace(/"/g, "").trim();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 async function apiForm(url, formData) {
@@ -278,6 +317,7 @@ function initStudentDashboard() {
   loadStudentComplaints();
   loadNotifCount();
   setInterval(loadNotifCount, 30000);
+  if (user.id) initWebSocket("student", user.id);
 }
 
 async function submitComplaint(e) {
@@ -503,8 +543,16 @@ function initAdminDashboard() {
 
   document.getElementById("adminLogout")?.addEventListener("click", () => logout("admin-login.html"));
   document.getElementById("refreshAdminComplaints")?.addEventListener("click", loadAdminComplaints);
-  document.getElementById("exportCsv")?.addEventListener("click", () => window.open(API.exportCsv + `?token=${getToken()}`, "_blank"));
-  document.getElementById("backupDb")?.addEventListener("click", () => window.open(API.backup, "_blank"));
+  document.getElementById("exportCsv")?.addEventListener("click", () => {
+    downloadAuthenticated(API.exportCsv, "complaints.csv").catch((e) => showToast(e.message, "error"));
+  });
+  document.getElementById("backupDb")?.addEventListener("click", () => {
+    downloadAuthenticated(API.backup, "backup.json").catch((e) => showToast(e.message, "error"));
+  });
+  document.getElementById("downloadAnalytics")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    downloadAuthenticated(API.analyticsJson, "analytics.json").catch((err) => showToast(err.message, "error"));
+  });
   document.getElementById("clearAllComplaints")?.addEventListener("click", clearAll);
   document.getElementById("loadSampleData")?.addEventListener("click", loadSampleData);
   document.getElementById("runEscalation")?.addEventListener("click", runEscalation);
@@ -1092,8 +1140,10 @@ async function submitStaffComment() {
 
 // WebSocket
 function initWebSocket(userType, userId) {
+  if (!userType || !userId || userId === "undefined") return;
   try {
-    const wsBase = (API_BASE || "http://127.0.0.1:8000").replace("https://","wss://").replace("http://","ws://");
+    const cleanBase = (API_BASE || LOCAL_API_BASE).replace(/\/+$/, "");
+    const wsBase = cleanBase.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://");
     const ws = new WebSocket(`${wsBase}/ws/${userType}/${userId}`);
     ws.onmessage = (e) => {
       try {
@@ -1149,17 +1199,21 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error(typeof err.detail === "string" ? err.detail : "Login failed");
         }
         const data = await res.json();
-        const me = await fetch(API.me, {
+        const meRes = await fetch(API.me, {
           headers: { "Authorization": "Bearer " + data.access_token }
-        }).then(r => r.json()).catch(() => ({}));
-        const user = { id: me.id, type: "student", name: me.name || name, email: me.email || email, admission_number: me.admission_number || admn };
-        sessionStorage.setItem("grievease_token", data.access_token);
-        sessionStorage.setItem("grievease_user", JSON.stringify(user));
-        localStorage.setItem("grievease_token", data.access_token);
-        localStorage.setItem("grievease_user", JSON.stringify(user));
+        });
+        const me = meRes.ok ? await meRes.json().catch(() => ({})) : {};
+        const user = {
+          id: me.id,
+          type: "student",
+          name: me.name || name,
+          email: me.email || email,
+          admission_number: me.admission_number || admn
+        };
+        setSession(data.access_token, user);
         window.location.href = "student-dashboard.html";
       } catch (err) {
-        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Is it running on port 8000?" : "❌ " + err.message;
+        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Check network or backend status." : "❌ " + err.message;
         if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
         else alert(msg);
       } finally {
@@ -1189,16 +1243,25 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password }),
         });
-        if (!res.ok) throw new Error("Invalid username or password");
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(typeof err.detail === "string" ? err.detail : "Invalid username or password");
+        }
         const data = await res.json();
-        const user = { type: data.user_role || "admin", name: username };
-        sessionStorage.setItem("grievease_token", data.access_token);
-        sessionStorage.setItem("grievease_user", JSON.stringify(user));
-        localStorage.setItem("grievease_token", data.access_token);
-        localStorage.setItem("grievease_user", JSON.stringify(user));
+        const meRes = await fetch(API.me, {
+          headers: { "Authorization": "Bearer " + data.access_token }
+        });
+        const me = meRes.ok ? await meRes.json().catch(() => ({})) : {};
+        const user = {
+          id: me.id,
+          type: data.user_role || "admin",
+          name: me.name || username,
+          username: me.username || username
+        };
+        setSession(data.access_token, user);
         window.location.href = "admin-dashboard.html";
       } catch (err) {
-        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Is it running on port 8000?" : "❌ " + err.message;
+        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Check network or backend status." : "❌ " + err.message;
         if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
         else alert(msg);
       } finally {
@@ -1228,19 +1291,23 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
         });
-        if (!res.ok) throw new Error("Invalid email or password");
+        if (!res.ok) {
+          if (res.status === 401) {
+            throw new Error("Invalid email or password");
+          } else {
+            throw new Error("Server error (" + res.status + "). Please try again.");
+          }
+        }
         const data = await res.json();
-        const me = await fetch(API.me, {
+        const meRes = await fetch(API.me, {
           headers: { "Authorization": "Bearer " + data.access_token }
-        }).then(r => r.json()).catch(() => ({}));
-        const user = { ...me, type: "staff" };
-        sessionStorage.setItem("grievease_token", data.access_token);
-        sessionStorage.setItem("grievease_user", JSON.stringify(user));
-        localStorage.setItem("grievease_token", data.access_token);
-        localStorage.setItem("grievease_user", JSON.stringify(user));
+        });
+        const me = meRes.ok ? await meRes.json().catch(() => ({})) : {};
+        const user = { id: me.id, ...me, type: "staff" };
+        setSession(data.access_token, user);
         window.location.href = "staff-dashboard.html";
       } catch (err) {
-        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Is it running on port 8000?" : "❌ " + err.message;
+        const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Check network or backend status." : "❌ " + err.message;
         if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
         else alert(msg);
       } finally {
@@ -1252,22 +1319,43 @@ document.addEventListener("DOMContentLoaded", () => {
   /* ---------- GUEST ACCESS ---------- */
   document.getElementById("guestAccess")?.addEventListener("click", async () => {
     const errEl = document.getElementById("studentLoginError");
+    const guestBtn = document.getElementById("guestAccess");
+    if (errEl) errEl.style.display = "none";
+    if (guestBtn) { guestBtn.disabled = true; guestBtn.textContent = "Logging in as Guest…"; }
     try {
       const res = await fetch(API.studentLogin, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Guest User", email: "guest@demo.com", admission_number: "GUEST2024" }),
       });
-      if (!res.ok) throw new Error("Guest login failed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(typeof err.detail === "string" ? err.detail : "Guest login failed");
+      }
       const data = await res.json();
-      const user = { type: "student", name: "Guest User", email: "guest@demo.com", admission_number: "GUEST2024" };
-      sessionStorage.setItem("grievease_token", data.access_token);
-      sessionStorage.setItem("grievease_user", JSON.stringify(user));
-      localStorage.setItem("grievease_token", data.access_token);
-      localStorage.setItem("grievease_user", JSON.stringify(user));
+      const meRes = await fetch(API.me, {
+        headers: { "Authorization": "Bearer " + data.access_token }
+      });
+      if (!meRes.ok) {
+        const err = await meRes.json().catch(() => ({}));
+        throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load guest profile");
+      }
+      const me = await meRes.json();
+      const user = {
+        id: me.id,
+        type: "student",
+        name: me.name || "Guest User",
+        email: me.email || "guest@demo.com",
+        admission_number: me.admission_number || "GUEST2024"
+      };
+      setSession(data.access_token, user);
       window.location.href = "student-dashboard.html";
     } catch (err) {
-      if (errEl) { errEl.textContent = "❌ Guest login failed. Check server."; errEl.style.display = "block"; }
+      const msg = err.message.includes("fetch") ? "❌ Cannot connect to server. Check network or backend status." : "❌ " + err.message;
+      if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+      else alert(msg);
+    } finally {
+      if (guestBtn) { guestBtn.disabled = false; guestBtn.textContent = "👤 Continue as Guest (Demo Mode)"; }
     }
   });
 

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import os
 
 from app.config import settings
-from app.database import init_db, get_db
+from app.database import init_db, get_db, SessionLocal
 from app.routes import complaints, users, staff, notifications, admin_extra
 from app.crud import init_admin, init_departments
 from app.websocket_manager import manager
@@ -17,10 +17,10 @@ async def lifespan(app: FastAPI):
     init_db()
     print("Database initialized")
 
-    db = next(get_db())
-    init_admin(db, settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
-    init_departments(db)
-    print("Default admin + departments ready")
+    with SessionLocal() as db:
+        init_admin(db, settings.ADMIN_USERNAME, settings.ADMIN_PASSWORD)
+        init_departments(db)
+    print("Default admin and departments ready")
 
     os.makedirs("uploads", exist_ok=True)
 
@@ -38,15 +38,15 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"(http://(localhost|127\.0\.0\.1)(:\d+)?|https://[a-zA-Z0-9-]+\.vercel\.app)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Static file serving for uploads
-if os.path.exists("uploads"):
-    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 # Routers
 app.include_router(users.router)
@@ -70,14 +70,6 @@ async def websocket_endpoint(websocket: WebSocket, user_type: str, user_id: int)
                 await websocket.send_text('{"type":"pong"}')
     except WebSocketDisconnect:
         manager.disconnect(websocket, user_key)
-
-
-# Escalation Trigger (Admin)
-@app.post("/api/admin/run-escalation")
-def run_escalation_now(db=Depends(get_db)):
-    from app.services.escalation_service import run_escalation
-    result = run_escalation(db)
-    return result
 
 
 # Root

@@ -238,11 +238,14 @@
     </section>
 
     <div id="chatbot-root"></div>
+    <script>
+      if (!["localhost", "127.0.0.1", ""].includes(window.location.hostname) && window.location.protocol !== "file:") {
+        window.__API_BASE__ = "https://grievease-pwob.onrender.com";
+      } else {
+        window.__API_BASE__ = "http://127.0.0.1:8000";
+      }
+    </script>
     <script src="script.js"></script>
-
-    <!-- Live stats from API -->
-    
-    
 
   </body>
 </html>

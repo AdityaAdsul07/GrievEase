@@ -84,7 +84,7 @@
         </div>
         <div class="card-actions">
           <button class="btn tertiary small" onclick="loadAnalytics()">Refresh</button>
-          <a id="downloadAnalytics" class="btn ghost small" href="/api/admin/reports/analytics/json" download>Export JSON</a>
+          <a id="downloadAnalytics" class="btn ghost small" href="#">Export JSON</a>
         </div>
       </div>
       <div id="analyticsKpis" class="kpi-row"></div>
@@ -373,7 +373,13 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script>window.__API_BASE__ = "https://grievease-pwob.onrender.com";</script>
+  <script>
+    if (!["localhost", "127.0.0.1", ""].includes(window.location.hostname) && window.location.protocol !== "file:") {
+      window.__API_BASE__ = "https://grievease-pwob.onrender.com";
+    } else {
+      window.__API_BASE__ = "http://127.0.0.1:8000";
+    }
+  </script>
   <script src="script.js"></script>
 
 </body>

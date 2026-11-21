@@ -37,7 +37,10 @@ class Settings:
             "null",  # file:// protocol
         ]
         if self.FRONTEND_URL:
-            origins.append(self.FRONTEND_URL)
+            for url in self.FRONTEND_URL.split(","):
+                cleaned = url.strip().rstrip("/")
+                if cleaned:
+                    origins.append(cleaned)
         return origins
 
     # Email
