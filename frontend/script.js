@@ -2,7 +2,8 @@
 
 // API_BASE: window.__API_BASE__ set karo HTML mein production ke liye
 // Local dev ke liye http://127.0.0.1:8000 use hoga
-const API_BASE = window.__API_BASE__ || "https://grievease-pwob.onrender.com";
+const API_BASE = window.__API_BASE__ ||
+  "https://grievease-pwob.onrender.com";
 
 const COLORS = ["#2563eb","#16a34a","#d97706","#dc2626","#7c3aed","#0891b2","#be185d","#15803d","#c2410c","#1d4ed8"];
 const COLORS_ALPHA = ["rgba(37,99,235,.7)","rgba(22,163,74,.7)","rgba(217,119,6,.7)","rgba(220,38,38,.7)","rgba(124,58,237,.7)","rgba(8,145,178,.7)","rgba(190,24,93,.7)","rgba(21,128,61,.7)","rgba(194,65,12,.7)","rgba(29,78,216,.7)"];
