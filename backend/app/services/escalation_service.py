@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Complaint
@@ -23,7 +23,10 @@ def run_escalation(db: Session) -> dict:
     for c in complaints:
         if not c.created_at:
             continue
-        age_hours = (now - c.created_at).total_seconds() / 3600
+        created = c.created_at
+        if created.tzinfo is not None:
+            created = created.astimezone(timezone.utc).replace(tzinfo=None)
+        age_hours = (now - created).total_seconds() / 3600
         age_days  = age_hours / 24
 
         new_level = c.escalation_level or 0

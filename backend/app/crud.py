@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, desc, or_, and_
 from typing import List, Optional, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 from fastapi import HTTPException, status
 
@@ -223,6 +223,14 @@ def predict_priority(title: str, description: str) -> str:
     return "Medium"
 
 
+def to_naive_utc(dt):
+    """Postgres returns timezone-aware datetimes, SQLite naive ones.
+    Normalise to naive UTC so they can be compared with datetime.utcnow()."""
+    if dt is not None and dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def get_sla_deadline(category: str) -> datetime:
     days = SLA_DAYS.get(category, 3)
     return datetime.utcnow() + timedelta(days=days)
@@ -392,7 +400,7 @@ def update_complaint_status(
         c.resolved_at = None
 
     # Check SLA breach
-    if c.sla_deadline and now > c.sla_deadline and update_data.status not in ("Resolved", "Closed"):
+    if c.sla_deadline and now > to_naive_utc(c.sla_deadline) and update_data.status not in ("Resolved", "Closed"):
         c.sla_breached = True
 
     # Timeline
@@ -680,7 +688,11 @@ def get_analytics(db: Session) -> dict:
     ).all()
     avg_days = 0
     if resolved_list:
-        days = [(c.resolved_at - c.created_at).days for c in resolved_list if c.resolved_at and c.resolved_at > c.created_at]
+        days = [
+            (to_naive_utc(c.resolved_at) - to_naive_utc(c.created_at)).days
+            for c in resolved_list
+            if c.resolved_at and c.created_at and to_naive_utc(c.resolved_at) > to_naive_utc(c.created_at)
+        ]
         avg_days = round(sum(days) / len(days), 1) if days else 0
 
     sla_breached = db.query(Complaint).filter(Complaint.sla_breached == True).count()
